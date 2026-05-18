@@ -2,7 +2,7 @@ import numpy as np
 
 
 class RandomSampling:
-    def __init__(self, m):
+    def __init__(self, m, k=None):
         self.m = m
         self.weights = None
         self.indices = None

@@ -58,7 +58,7 @@ def plot_maps(P, P_raw, scaler, info, algorithms, out_dir, k_values=MAP_K, q_fra
                 _draw_panel(axes[0], P_plot, labels_full, C_orig, dx, dy, xlabel, ylabel, full_title)
 
                 for idx, (algo_name, AlgoClass) in enumerate(algorithms.items(), start=1):
-                    Q, w = make_coreset(P, AlgoClass, m, seed=0)
+                    Q, w = make_coreset(P, AlgoClass, m, k, seed=0)
                     Cp = fit_centers(Q, w, k, seed=0)
                     labels_algo = _assign(P_sub, Cp)
                     Cp_orig = scaler.inverse_transform(Cp)

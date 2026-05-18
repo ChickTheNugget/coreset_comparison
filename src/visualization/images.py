@@ -37,7 +37,7 @@ def _compute_algo_quantizations(P, scaler, shape, algorithms, k_values, q_fracti
         for frac in q_fractions:
             m = coreset_size(n, k, frac)
             for algo_name, AlgoClass in algorithms.items():
-                Q, w = make_coreset(P, AlgoClass, m, seed=0)
+                Q, w = make_coreset(P, AlgoClass, m, k, seed=0)
                 Cp = fit_centers(Q, w, k, seed=0)
                 quantizations[algo_name][(k, frac)] = _quantize(P, scaler, Cp, shape)
     return quantizations

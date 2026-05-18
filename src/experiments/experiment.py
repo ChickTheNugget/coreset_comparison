@@ -20,9 +20,9 @@ def fit_full_kmeans(P, k, seed=0):
     return km.cluster_centers_
 
 
-def make_coreset(P, AlgoClass, m, seed=0):
+def make_coreset(P, AlgoClass, m, k, seed=0):
     np.random.seed(seed)
-    algo = AlgoClass(m)
+    algo = AlgoClass(m, k=k)
     Q = algo.generate(P)
     return Q, algo.weights
 
@@ -51,7 +51,7 @@ def run_grid(P, algorithms, k_values=K_VALUES, q_fractions=Q_FRACTIONS, n_trials
 
             for algo_name, AlgoClass in algorithms.items():
                 for seed in range(n_trials):
-                    Q, w = make_coreset(P, AlgoClass, m, seed=seed)
+                    Q, w = make_coreset(P, AlgoClass, m, k, seed=seed)
                     Cp = fit_centers(Q, w, k, seed=seed)
 
                     cost_Q_C = kmeans_cost(Q, C, w)
