@@ -14,12 +14,11 @@ class BiasedCoreset:
         k = self.k
         q = self.m
         
-        # Fast Initial Approximation (Cython Backend)
+        # Initial Approximation
         subset_size = min(n, max(1024, q))
         subset_indices = np.random.choice(n, size=subset_size, replace=False)
         subset = data[subset_indices]
         
-        # Note: Removing random_state=42 so it respects the team's global seed in run_grid
         centers, _ = kmeans_plusplus(subset, n_clusters=k)
         labels = pairwise_distances_argmin(data, centers)
         
