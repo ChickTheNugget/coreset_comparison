@@ -5,7 +5,7 @@ from sklearn.cluster import KMeans
 from .kmeans_cost import kmeans_cost
 
 K_VALUES = [2, 4, 8, 16, 32, 64]
-Q_FRACTIONS = [0.0025, 0.005, 0.01, 0.05, 0.10, 0.25, 0.50]
+Q_FRACTIONS = [0.00005, 0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.05, 0.10, 0.25, 0.50]
 N_TRIALS = 5
 
 
@@ -23,8 +23,11 @@ def fit_full_kmeans(P, k, seed=0):
 def make_coreset(P, AlgoClass, m, k, seed=0):
     np.random.seed(seed)
     algo = AlgoClass(m, k=k)
-    Q = algo.generate(P)
-    return Q, algo.weights
+    result = algo.generate(P)
+    if isinstance(result, tuple):
+        Q, w = result
+        return Q, w
+    return result, algo.weights
 
 
 def fit_centers(Q, w, k, seed=0):
