@@ -29,6 +29,19 @@ DATASETS = {
         "features": ["energy", "valence", "danceability", "acousticness"],
         "map": False,
     },
+    "spotify_6d": {
+        "type": "tabular",
+        "path": "data/real/spotify_6d.csv",
+        "features": ["energy", "valence", "danceability", "acousticness", "speechiness", "liveness"],
+        "map": False,
+    },
+    "spotify_9d": {
+        "type": "tabular",
+        "path": "data/real/spotify_9d.csv",
+        "features": ["energy", "valence", "danceability", "acousticness", "speechiness", "liveness",
+                      "instrumentalness", "loudness", "tempo"],
+        "map": False,
+    },
     "uber": {
         "type": "tabular",
         "path": "data/real/uber.csv",
@@ -36,6 +49,12 @@ DATASETS = {
         "map": True,
         "map_dims": (0, 1),
         "map_labels": ("Longitude", "Latitude"),
+    },
+    "wholesale": {
+        "type": "tabular",
+        "path": "data/real/wholesale.csv",
+        "features": ["Fresh", "Milk", "Grocery", "Frozen", "Detergents_Paper", "Delicassen"],
+        "map": False,
     },
     "donuts": {
         "type": "tabular",
