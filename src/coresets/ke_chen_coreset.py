@@ -1,137 +1,153 @@
 import math
 import numpy as np
 
-
-def _kmeans_plus_plus_init(X, k, rng):
-    n, d = X.shape
-    centers = np.empty((k, d))
-    centers[0] = X[rng.integers(n)]
-    for i in range(1, k):
-        diffs = X[:, np.newaxis, :] - centers[:i][np.newaxis, :, :]
-        min_sq = np.sum(diffs ** 2, axis=2).min(axis=1)
-        probs = min_sq / min_sq.sum()
-        centers[i] = X[rng.choice(n, p=probs)]
-    return centers
-
-
-def _assign_clusters(X, centers):
-    diffs = X[:, np.newaxis, :] - centers[np.newaxis, :, :]
-    return np.sum(diffs ** 2, axis=2).argmin(axis=1)
-
-
-def _kmeans_plus_plus(X, k, weights=None, max_iter=50, seed=None):
-    rng = np.random.default_rng(seed)
-    if weights is None:
-        weights = np.ones(len(X))
-    centers = _kmeans_plus_plus_init(X, k, rng)
-    prev_cost = np.inf
-    for _ in range(max_iter):
-        labels = _assign_clusters(X, centers)
-        new_centers = np.empty_like(centers)
-        for c in range(k):
-            mask = labels == c
-            new_centers[c] = (np.average(X[mask], axis=0, weights=weights[mask])
-                              if mask.any() else X[rng.integers(len(X))])
-        cost = float(np.dot(weights,
-                            np.sum((X - new_centers[_assign_clusters(X, new_centers)]) ** 2,
-                                   axis=1)))
-        centers = new_centers
-        if prev_cost > 0 and abs(prev_cost - cost) / prev_cost < 1e-6:
-            break
-        prev_cost = cost
-    return centers
-
-
-def _build_ring_partition(X, A, nu_A, beta=1.0):
-    n = len(X)
-    R = max(nu_A / (beta * n), 1e-10) if n > 0 else 1e-10
-    phi = math.ceil(math.log2(beta * n)) if n > 1 else 1
-    labels = _assign_clusters(X, A)
-    ring_sets = {}
-    for idx in range(n):
-        i = int(labels[idx])
-        dist = float(np.linalg.norm(X[idx] - A[i]))
-        j = 0 if dist <= R else min(phi, max(1, math.ceil(math.log2(dist / R))))
-        ring_sets.setdefault((i, j), []).append(idx)
-    return ring_sets, R
-
-
-def _compute_sample_size(k, epsilon, n, lam=0.1, beta=1.0, c=0.1):
-    if n <= 1:
-        return 1
-    s = c * (beta ** 2) / (epsilon ** 2) * (k * math.log(n) + math.log(1.0 / lam))
-    return max(1, math.ceil(s))
-
-
-def _epsilon_for_target_size(X, k, target_m, seed=0, tol=0.05, max_iter=30):
-    lo, hi = 0.01, 10.0
-    best_eps = 0.3
-    for _ in range(max_iter):
-        mid = (lo + hi) / 2
-        s = _compute_sample_size(k, mid, len(X))
-        # Rough size estimate: n_rings * s  (rings ≈ k * log2(n))
-        n_rings = k * max(1, math.ceil(math.log2(max(len(X), 2))))
-        est_size = min(len(X), n_rings * s)
-        if est_size > target_m:
-            lo = mid
-        else:
-            hi = mid
-        best_eps = mid
-        if abs(est_size - target_m) / max(target_m, 1) < tol:
-            break
-    return best_eps
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.metrics import pairwise_distances_argmin
+from sklearn.cluster import KMeans
 
 
 class KeChenCoreset:
     def __init__(self, m, k=8, seed=42):
-        self.m    = m
-        self.k    = k
+        self.m = int(m)
+        self.k = int(k)
         self.seed = seed
-
         self.indices = None
         self.weights = None
 
+
+    # Phase 1: fast bicriteria clustering (sklearn optimized)
+    def _bicriteria(self, X):
+        kmeans = MiniBatchKMeans(
+            n_clusters=self.k,
+            random_state=self.seed,
+            batch_size=4096,
+            n_init=10,
+            max_iter=50
+        )
+        kmeans.fit(X)
+        return kmeans.cluster_centers_
+
+
+    # Phase 2: fast assignment (C-optimized sklearn routine)
+    def _assign(self, X, centers):
+        return pairwise_distances_argmin(X, centers)
+
+    # Main coreset construction
     def generate(self, data):
-        X = np.asarray(data, dtype=float)
-        n, d = X.shape
-        k = self.k
+
+        X = np.asarray(data, dtype=np.float32)
+        n = X.shape[0]
+
         rng = np.random.default_rng(self.seed)
 
-        # Phase 1: approximate centers (O(nk), same asymptotic as Lloyd)
-        A = _kmeans_plus_plus(X, k, max_iter=50, seed=self.seed)
+        # 1. Bicriteria centers
+        A = self._bicriteria(X)
 
-        labels = _assign_clusters(X, A)
-        dists  = np.linalg.norm(X - A[labels], axis=1)
-        nu_A   = float(dists.sum())
+        labels = self._assign(X, A)
 
-        # Phase 2: ring partition
-        ring_sets, R = _build_ring_partition(X, A, nu_A)
+        diffs = X - A[labels]
+        sq_dists = np.sum(diffs * diffs, axis=1)
 
-        # Phase 3: sample s points from each ring, weighted by ring_size / s
-        # Tune epsilon so total coreset size ≈ self.m
-        eps = _epsilon_for_target_size(X, k, self.m, seed=self.seed)
-        s   = _compute_sample_size(k, eps, n)
+        # k-means objective uses squared distances, keep squared
+        dists = sq_dists
 
-        coreset_pts, coreset_wts, coreset_idx = [], [], []
+        nu_A = float(np.sum(dists))
 
-        for (i, j), idx_list in ring_sets.items():
-            size = len(idx_list)
-            pts  = X[idx_list]
-            if size <= s:
-                coreset_pts.append(pts)
-                coreset_wts.append(np.ones(size))
-                coreset_idx.extend(idx_list)
+        # 2. Ring partition
+        R = max(nu_A / max(n, 1), 1e-12)
+        phi = max(1, math.ceil(math.log2(max(n, 2))))
+
+        ring_sets = {}
+
+        for i in range(n):
+
+            dist = dists[i]
+
+            if dist <= R:
+                j = 0
             else:
-                chosen = rng.choice(size, size=s, replace=True)
-                coreset_pts.append(pts[chosen])
-                coreset_wts.append(np.full(s, size / s))
-                coreset_idx.extend([idx_list[c] for c in chosen])
+                # use sqrt only for indexing stability
+                j = min(phi, max(1, math.ceil(math.log2((dist + 1e-12) / (R + 1e-12)))))
 
-        points  = np.vstack(coreset_pts)
-        weights = np.concatenate(coreset_wts)
+            key = (int(labels[i]), j)
 
-        # indices: best-effort (may have duplicates from sampling with replacement)
-        self.indices = np.array(coreset_idx, dtype=int)
-        self.weights = weights
+            if key not in ring_sets:
+                ring_sets[key] = []
 
-        return points, weights
+            ring_sets[key].append(i)
+
+        
+        # 3. Adaptive sampling
+        items = list(ring_sets.items())
+        ring_sizes = np.array([len(v) for _, v in items], dtype=np.float64)
+
+        total = ring_sizes.sum()
+
+        ring_budgets = np.maximum(
+            1,
+            np.floor(self.m * ring_sizes / total).astype(int)
+        )
+
+        while ring_budgets.sum() > self.m:
+            ring_budgets[np.argmax(ring_budgets)] -= 1
+
+        while ring_budgets.sum() < self.m:
+            ring_budgets[np.argmax(ring_sizes)] += 1
+
+        # 4. Sampling
+        S_list = []
+        W_list = []
+        I_list = []
+
+        for budget, (_, idx_list) in zip(ring_budgets, items):
+
+            idx = np.asarray(idx_list)
+
+            size = len(idx)
+
+            if size == 0:
+                continue
+
+            b = min(size, budget)
+
+            chosen = rng.choice(size, size=b, replace=False)
+
+            sel = idx[chosen]
+
+            S_list.append(X[sel])
+
+            # weight = ring scaling
+            W_list.append(np.full(b, size / b, dtype=np.float32))
+
+            I_list.append(sel)
+
+        S = np.vstack(S_list)
+        W = np.concatenate(W_list)
+        I = np.concatenate(I_list)
+
+        self.indices = I.astype(np.int32)
+        self.weights = W.astype(np.float32)
+
+        return S, W
+
+
+def final_kmeans(X, k, w):
+    km = KMeans(n_clusters=k, n_init=10, random_state=0)
+    km.fit(X, sample_weight=w)
+    return km.cluster_centers_
+
+
+from sklearn.cluster import MiniBatchKMeans
+
+def fit_final_kmeans(S, W, k, seed):
+    model = MiniBatchKMeans(
+        n_clusters=k,
+        random_state=seed,
+        n_init=10,
+        max_iter=100,
+        batch_size=2048
+    )
+
+    model.fit(S, sample_weight=W)
+
+    return model.cluster_centers_
